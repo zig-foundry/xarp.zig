@@ -1,18 +1,18 @@
-//! By convention, root.zig is the root source file when making a package.
+//! # Xarp
+//!
+//! A zero-dependency command-line argument parser with a
+//! self-contained ANSI styling engine (24 named colors, 8-bit 256-color,
+//! and 24-bit TrueColor).
+
 const std = @import("std");
-const Io = std.Io;
 
-/// This is a documentation comment to explain the `printAnotherMessage` function below.
-///
-/// Accepting an `Io.Writer` instance is a handy way to write reusable code.
-pub fn printAnotherMessage(writer: *Io.Writer) Io.Writer.Error!void {
-    try writer.print("Run `zig build test` to run the tests.\n", .{});
-}
+/// Color definitions and ANSI escape sequence generation.
+pub const color = @import("color.zig");
 
-pub fn add(a: i32, b: i32) i32 {
-    return a + b;
-}
+pub const Color = color.Color;
+pub const Rgb = color.Rgb;
+pub const RESET = color.RESET;
 
-test "basic add functionality" {
-    try std.testing.expect(add(3, 7) == 10);
+test {
+    std.testing.refAllDecls(@This());
 }
