@@ -78,6 +78,10 @@ pub const Color = union(enum) {
             .rgb => |c| try writer.print("{s};2;{d};{d};{d}", .{ base_ext, c.r, c.g, c.b }),
         }
     }
+
+    pub fn format(self: Color, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        return self.writeAnsi(writer, false);
+    }
 };
 
 test "writeAnsi renders correctly in Zig 0.16" {
@@ -88,4 +92,14 @@ test "writeAnsi renders correctly in Zig 0.16" {
     try c.writeAnsi(&writer, false);
 
     try std.testing.expectEqualStrings("38;2;255;128;0", writer.buffered());
+}
+
+test "print with {f}" {
+    var buf: [64]u8 = undefined;
+    var writer: std.Io.Writer = .fixed(&buf);
+
+    const red: Color = .red;
+    try writer.print("\x1b[{f}mHello\x1b[0m", .{red});
+
+    try std.testing.expectEqualStrings("\x1b[31mHello\x1b[0m", writer.buffered());
 }
