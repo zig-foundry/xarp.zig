@@ -3,9 +3,9 @@ const Color = @import("color.zig").Color;
 const Effects = @import("effect.zig").Effects;
 pub const Style = struct {
     /// Foreground color.
-    fg: Color,
+    fg: ?Color = null,
     /// Background color.
-    bg: Color,
+    bg: ?Color = null,
     /// Set of visual text effects.
     effects: Effects,
 

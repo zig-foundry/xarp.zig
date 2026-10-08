@@ -13,6 +13,9 @@ pub const Color = color.Color;
 pub const Rgb = color.Rgb;
 pub const RESET = color.RESET;
 
+pub const effect = @import("effect.zig");
+pub const Effects = effect.Effects;
+
 test {
     std.testing.refAllDecls(@This());
 }
