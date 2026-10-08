@@ -1,52 +1,91 @@
+//! Color definitions and ANSI escape sequence generation.
+
 const std = @import("std");
 
+/// ANSI escape sequence to reset terminal styling and colors.
+pub const RESET = "\x1b[0m";
+
+/// 24-bit `TrueColor` RGB values (red, green, blue).
 pub const Rgb = struct {
+    /// Red component intensity (0–255).
     r: u8,
+    /// Green component intensity (0–255).
     g: u8,
+    /// Blue component intensity (0–255).
     b: u8,
 };
 
-/// 24 distinct named colors, 8-bit ANSI palette, and 24-bit TrueColor (RGB).
+/// 24 distinct named colors, 8-bit ANSI palette, and 24-bit `TrueColor` (RGB).
 pub const Color = union(enum) {
     // Standard ANSI
+    /// Standard ANSI black.
     black,
+    /// Standard ANSI red.
     red,
+    /// Standard ANSI green.
     green,
+    /// Standard ANSI yellow.
     yellow,
+    /// Standard ANSI blue.
     blue,
+    /// Standard ANSI magenta.
     magenta,
+    /// Standard ANSI cyan.
     cyan,
+    /// Standard ANSI white.
     white,
 
     // High-intensity
+    /// High-intensity black (charcoal / gray).
     bright_black,
+    /// High-intensity red.
     bright_red,
+    /// High-intensity green.
     bright_green,
+    /// High-intensity yellow.
     bright_yellow,
+    /// High-intensity blue.
     bright_blue,
+    /// High-intensity magenta.
     bright_magenta,
+    /// High-intensity cyan.
     bright_cyan,
+    /// High-intensity white.
     bright_white,
 
     // Extended palette
+    /// Extended palette orange (ANSI 208).
     orange,
+    /// Extended palette purple (ANSI 129).
     purple,
+    /// Extended palette pink (ANSI 205).
     pink,
+    /// Extended palette teal (ANSI 30).
     teal,
+    /// Extended palette gold (ANSI 220).
     gold,
+    /// Extended palette silver (ANSI 248).
     silver,
+    /// Extended palette lime (ANSI 118).
     lime,
+    /// Extended palette indigo (ANSI 54).
     indigo,
 
     // Parameterized variants
+    /// 8-bit ANSI 256-color palette code.
     ansi256: u8,
+    /// 24-bit `TrueColor` RGB values (red, green, blue).
     rgb: Rgb,
 
-    /// Renders color code to a modern Zig 0.16 `*std.Io.Writer`.
+    /// Renders color parameters to a standard ANSI sequence stream.
+    ///
+    /// Writes either foreground (`30–37`, `90–97`, `38;...`) or background
+    /// (`40–47`, `100–107`, `48;...`) parameters according to `is_bg`.
     pub fn writeAnsi(self: Color, writer: *std.Io.Writer, is_bg: bool) std.Io.Writer.Error!void {
         const base_ext = if (is_bg) "48" else "38";
 
         switch (self) {
+            // Standard ANSI
             .black => try writer.writeAll(if (is_bg) "40" else "30"),
             .red => try writer.writeAll(if (is_bg) "41" else "31"),
             .green => try writer.writeAll(if (is_bg) "42" else "32"),
@@ -56,6 +95,7 @@ pub const Color = union(enum) {
             .cyan => try writer.writeAll(if (is_bg) "46" else "36"),
             .white => try writer.writeAll(if (is_bg) "47" else "37"),
 
+            // High-intensity
             .bright_black => try writer.writeAll(if (is_bg) "100" else "90"),
             .bright_red => try writer.writeAll(if (is_bg) "101" else "91"),
             .bright_green => try writer.writeAll(if (is_bg) "102" else "92"),
@@ -65,6 +105,7 @@ pub const Color = union(enum) {
             .bright_cyan => try writer.writeAll(if (is_bg) "106" else "96"),
             .bright_white => try writer.writeAll(if (is_bg) "107" else "97"),
 
+            // Extended palette
             .orange => try writer.writeAll(if (is_bg) "48;5;208" else "38;5;208"),
             .purple => try writer.writeAll(if (is_bg) "48;5;129" else "38;5;129"),
             .pink => try writer.writeAll(if (is_bg) "48;5;205" else "38;5;205"),
@@ -74,32 +115,89 @@ pub const Color = union(enum) {
             .lime => try writer.writeAll(if (is_bg) "48;5;118" else "38;5;118"),
             .indigo => try writer.writeAll(if (is_bg) "48;5;54" else "38;5;54"),
 
+            // Parameterized variants
             .ansi256 => |code| try writer.print("{s};5;{d}", .{ base_ext, code }),
             .rgb => |c| try writer.print("{s};2;{d};{d};{d}", .{ base_ext, c.r, c.g, c.b }),
         }
     }
 
+    /// Formats the color as a foreground ANSI parameter string via `{f}`.
     pub fn format(self: Color, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         return self.writeAnsi(writer, false);
     }
 };
 
-test "writeAnsi renders correctly in Zig 0.16" {
+// === Tests ===
+
+test "writeAnsi foreground standard and bright" {
     var buf: [64]u8 = undefined;
+
+    // Standard foreground red (31)
     var writer: std.Io.Writer = .fixed(&buf);
+    const red: Color = .red;
+    try red.writeAnsi(&writer, false);
+    try std.testing.expectEqualStrings("31", writer.buffered());
 
-    const c: Color = .{ .rgb = .{ .r = 255, .g = 128, .b = 0 } };
-    try c.writeAnsi(&writer, false);
-
-    try std.testing.expectEqualStrings("38;2;255;128;0", writer.buffered());
+    // Bright foreground cyan (96)
+    writer = .fixed(&buf);
+    const bright_cyan: Color = .bright_cyan;
+    try bright_cyan.writeAnsi(&writer, false);
+    try std.testing.expectEqualStrings("96", writer.buffered());
 }
 
-test "print with {f}" {
+test "writeAnsi background standard and bright" {
+    var buf: [64]u8 = undefined;
+
+    // Standard background black (40)
+    var writer: std.Io.Writer = .fixed(&buf);
+    const black: Color = .black;
+    try black.writeAnsi(&writer, true);
+    try std.testing.expectEqualStrings("40", writer.buffered());
+
+    // Bright background green (102)
+    writer = .fixed(&buf);
+    const bright_green: Color = .bright_green;
+    try bright_green.writeAnsi(&writer, true);
+    try std.testing.expectEqualStrings("102", writer.buffered());
+}
+
+test "writeAnsi extended palette" {
+    var buf: [64]u8 = undefined;
+
+    // Foreground orange (38;5;208)
+    var writer: std.Io.Writer = .fixed(&buf);
+    const orange: Color = .orange;
+    try orange.writeAnsi(&writer, false);
+    try std.testing.expectEqualStrings("38;5;208", writer.buffered());
+
+    // Background teal (48;5;30)
+    writer = .fixed(&buf);
+    const teal: Color = .teal;
+    try teal.writeAnsi(&writer, true);
+    try std.testing.expectEqualStrings("48;5;30", writer.buffered());
+}
+
+test "writeAnsi 256 and rgb truecolor" {
+    var buf: [64]u8 = undefined;
+
+    // ANSI 256-color
+    var writer: std.Io.Writer = .fixed(&buf);
+    const c256: Color = .{ .ansi256 = 141 };
+    try c256.writeAnsi(&writer, false);
+    try std.testing.expectEqualStrings("38;5;141", writer.buffered());
+
+    // TrueColor RGB background
+    writer = .fixed(&buf);
+    const crgb: Color = .{ .rgb = .{ .r = 255, .g = 110, .b = 64 } };
+    try crgb.writeAnsi(&writer, true);
+    try std.testing.expectEqualStrings("48;2;255;110;64", writer.buffered());
+}
+
+test "format hook integration with {f}" {
     var buf: [64]u8 = undefined;
     var writer: std.Io.Writer = .fixed(&buf);
 
     const red: Color = .red;
     try writer.print("\x1b[{f}mHello\x1b[0m", .{red});
-
     try std.testing.expectEqualStrings("\x1b[31mHello\x1b[0m", writer.buffered());
 }
