@@ -346,9 +346,9 @@ pub const Xarp = struct {
         switch (try self.parseImpl(argv, null)) {
             .matches => |matches| return matches,
             .err => |err| {
-                const fd: i32 = if (err.isParse()) std.posix.STDERR_FILENO else std.posix.STDOUT_FILENO;
-                _ = std.posix.write(fd, err.message()) catch {};
-                if (err.isVersion()) _ = std.posix.write(fd, "\n") catch {};
+                const fd: i32 = if (err.isParse()) 2 else 1;
+                writeAll(fd, err.message());
+                if (err.isVersion()) writeAll(fd, "\n");
                 err.deinit(self.allocator);
                 std.process.exit(if (err.isParse()) 2 else 0);
             },
@@ -711,14 +711,14 @@ pub const Xarp = struct {
     pub fn printVersion(self: *const Xarp) !void {
         const text = try self.renderVersion();
         defer self.allocator.free(text);
-        _ = std.posix.write(std.posix.STDOUT_FILENO, text) catch {};
-        _ = std.posix.write(std.posix.STDOUT_FILENO, "\n") catch {};
+        writeAll(1, text);
+        writeAll(1, "\n");
     }
 
     pub fn printHelp(self: *const Xarp) !void {
         const text = try self.renderHelp();
         defer self.allocator.free(text);
-        _ = std.posix.write(std.posix.STDOUT_FILENO, text) catch {};
+        writeAll(1, text);
     }
 
     pub fn renderVersion(self: *const Xarp) ![]u8 {
@@ -940,6 +940,15 @@ pub const Xarp = struct {
         return .{ .parse = try buf.toOwned() };
     }
 };
+
+fn writeAll(fd: i32, bytes: []const u8) void {
+    var left = bytes;
+    while (left.len != 0) {
+        const n = std.c.write(fd, left.ptr, left.len);
+        if (n <= 0) return;
+        left = left[@intCast(n)..];
+    }
+}
 
 fn hasCollision(args: []const Arg, id: []const u8, short: u8, long: []const u8) bool {
     for (args) |arg| {
