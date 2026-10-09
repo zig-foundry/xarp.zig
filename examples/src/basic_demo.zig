@@ -1,9 +1,11 @@
-//! Basic demo: required positional, flags, defaults, and a subcommand.
+//! Basic CLI example demonstrating required positionals, flags, defaults, and subcommands.
 //!
+//! Run with:
 //! ```sh
 //! zig build basic -- input.txt -v
 //! zig build basic -- build --release
 //! ```
+
 const std = @import("std");
 const xarp = @import("xarp_zig");
 
@@ -12,7 +14,7 @@ pub fn main(init: std.process.Init) !void {
     const argv = try init.minimal.args.toSlice(allocator);
     defer allocator.free(argv);
 
-    var build_cmd = xarp.Xarp.new(allocator, "build").withAbout("Compile source packages into binary districutions");
+    var build_cmd = xarp.Xarp.new(allocator, "build").withAbout("Compile source packages into binary distributions");
     try build_cmd.addArg(xarp.Arg.new("release").withLong("release").withHelp("Compile in release mode").withAction(.set_true));
 
     var app = xarp.Xarp.new(allocator, "mycli")

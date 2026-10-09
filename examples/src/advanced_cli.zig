@@ -1,7 +1,7 @@
-//! Advanced demo: typed values (`u16` port) and repeated `--header` flags.
+//! Advanced CLI example demonstrating typed integer parsing and repeatable flags.
 //!
-//! Builds a fixed arg list so you can run it without passing CLI input.
-//! Routes into the `serve` subcommand and prints the parsed config.
+//! Uses a mock argument array so you can run it directly without CLI arguments.
+//! Parses arguments into the `serve` subcommand and prints the resolved values.
 
 const std = @import("std");
 const xarp = @import("xarp_zig");
@@ -51,7 +51,6 @@ pub fn main() !void {
             const name, const sub = matches.getSubcommand() orelse return;
             if (!std.mem.eql(u8, name, "serve")) return;
 
-            // Path stays a slice; Zig has no PathBuf type.
             const port = (try sub.tryGetOne(u16, "port")) orelse return error.BadPort;
             const root = sub.getOne("root") orelse return error.MissingRoot;
             const headers = sub.getMany("headers") orelse &.{};
