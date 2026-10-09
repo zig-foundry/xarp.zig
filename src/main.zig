@@ -1,17 +1,38 @@
 const std = @import("std");
-const Io = std.Io;
-const xarp = @import("root.zig");
+const xarp = @import("xarp_zig");
 
 pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
     const io = init.io;
+    const argv = try init.minimal.args.toSlice(allocator);
+    defer allocator.free(argv);
 
-    var stdout_buffer: [1024]u8 = undefined;
-    var stdout_file_writer: Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
-    const writer = &stdout_file_writer.interface;
+    const no_color = init.minimal.environ.getPosix("NO_COLOR") != null;
+    var app = xarp.Xarp.new(allocator, "xarp_zig").withStyles(xarp.Styles.styledUnless(no_color));
+    defer app.deinit();
+    app = app.withVersion("0.1.0").withAbout("Zero-dependency argument parser");
+    try app.addArg(xarp.Arg.new("name").withLong("name").withShort('n').withHelp("Name to greet"));
 
-    const banner: xarp.Color = .bright_cyan;
-    const accent: xarp.Color = .bright_green;
-
-    try writer.print("\x1b[{f}mXarp CLI Engine\x1b[0m (\x1b[{f}mready\x1b[0m)\n", .{ banner, accent });
-    try writer.flush();
+    var outcome = try app.tryGetMatchesFrom(argv);
+    switch (outcome) {
+        .matches => |*matches| {
+            defer matches.deinit();
+            var stdout_buffer: [1024]u8 = undefined;
+            var stdout_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
+            const writer = &stdout_writer.interface;
+            const name = matches.getOne("name") orelse "world";
+            try writer.print("{f}{s}{s}\n", .{ xarp.BRIGHT_CYAN, name, xarp.RESET });
+            try writer.flush();
+        },
+        .err => |err| {
+            defer err.deinit(allocator);
+            var buffer: [1024]u8 = undefined;
+            const file: std.Io.File = if (err.isParse()) .stderr() else .stdout();
+            var file_writer: std.Io.File.Writer = .init(file, io, &buffer);
+            const writer = &file_writer.interface;
+            try writer.print("{s}\n", .{err.message()});
+            try writer.flush();
+            if (err.isParse()) std.process.exit(2);
+        },
+    }
 }

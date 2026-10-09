@@ -1,9 +1,8 @@
 //! Text styles, ANSI output formatting, and CLI theme configurations.
 //!
-//! Rust overloads `|` for `Style`, `Color`, and `Effects`. Zig has no custom
-//! operators, so those are methods: `merge`, `withColor`, and `withEffects`.
-//! Rust's `{:#}` alternate format (ANSI reset) is `writeReset`; `{f}` on a
-//! style writes the opening SGR sequence.
+//! Combine styles with `merge`. `withColor` sets a foreground only when one
+//! is not already set. `{f}` writes the opening SGR sequence; `writeReset`
+//! writes the reset.
 
 const std = @import("std");
 const Color = @import("color.zig").Color;
@@ -12,8 +11,7 @@ const Effects = @import("effect.zig").Effects;
 
 /// Combined text style: effects, foreground, and background.
 ///
-/// `fg` and `bg` are optional. Rust's `Option<Color>` is Zig's `?Color`;
-/// `null` means "no color", not a color value.
+/// `fg` and `bg` are optional. `null` means no color is applied.
 pub const Style = struct {
     /// Foreground color.
     fg: ?Color = null,
@@ -46,7 +44,7 @@ pub const Style = struct {
         return next;
     }
 
-    /// Adds text effects to the current style (union, same as Rust `insert`).
+    /// Adds text effects to the current style. Existing effects are kept.
     pub fn withEffects(self: Style, effects: Effects) Style {
         var next = self;
         next.effects = self.effects.insert(effects);
@@ -98,7 +96,7 @@ pub const Style = struct {
         return self.withEffects(.DOUBLE_UNDERLINE);
     }
 
-    /// Rust `Style | Style`. Right-hand `fg`/`bg` win when set; effects union.
+    /// Merges two styles. Right-hand `fg` and `bg` win when set; effects are united.
     pub fn merge(self: Style, rhs: Style) Style {
         return .{
             .fg = rhs.fg orelse self.fg,
@@ -107,8 +105,7 @@ pub const Style = struct {
         };
     }
 
-    /// Rust `Style | Color` and `Color | Style` when the style has no foreground.
-    /// The style's foreground wins when already set.
+    /// Sets the foreground when `self` does not already have one.
     pub fn withColor(self: Style, color: Color) Style {
         return Style.new().fgColor(color).merge(self);
     }
@@ -128,7 +125,7 @@ pub const Style = struct {
         try self.writeAnsi(writer);
     }
 
-    /// Writes `\x1b[0m`. Rust renders this via the alternate `{:#}` format.
+    /// Writes the ANSI reset sequence `\x1b[0m`.
     pub fn writeReset(writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.writeAll(RESET);
     }
@@ -201,7 +198,9 @@ pub const Styles = struct {
     literal: Style = .{},
     /// Style applied to argument value placeholders.
     placeholder: Style = .{},
-    /// Style applied to error messages. `error` is a Zig keyword, so the field is `@"error"`.
+    /// Style applied to error messages.
+    ///
+    /// Named `@"error"` because `error` is a keyword.
     @"error": Style = .{},
     /// Style applied to valid values or states.
     valid: Style = .{},
@@ -219,14 +218,21 @@ pub const Styles = struct {
 
     /// Default styled CLI theme (Cargo / Clap v4 styled look).
     ///
-    /// Returns plain styles when `NO_COLOR` is present, including an empty
-    /// value (any presence disables color, per https://no-color.org).
+    /// This does not read the process environment. Zig 0.16 has no libc-free
+    /// global getenv. Pass the result of `init.environ.getPosix("NO_COLOR") != null`
+    /// to `styledUnless` when color should follow `NO_COLOR`.
     pub fn styled() Styles {
-        if (std.posix.getenv("NO_COLOR") != null) return plain();
         return themed();
     }
 
-    /// The color theme, ignoring `NO_COLOR`. Tests use this so the host env cannot flake them.
+    /// Returns plain styles when `no_color` is true, otherwise the default theme.
+    /// Any presence of `NO_COLOR`, including an empty value, should set `no_color`.
+    pub fn styledUnless(no_color: bool) Styles {
+        if (no_color) return plain();
+        return themed();
+    }
+
+    /// The color theme, ignoring `NO_COLOR`.
     pub fn themed() Styles {
         return .{
             .header = Style.new().bold().underline(),
@@ -296,8 +302,7 @@ pub const Styles = struct {
     }
 };
 
-// Preset styles. Rust keeps these in `color.rs`, which imports `Style`.
-// That would be a Zig import cycle (`color.zig` <-> `style.zig`), so they live here.
+// Preset styles. Kept here so `color.zig` does not import this file.
 
 /// Preset style with bold text effect.
 pub const BOLD: Style = Style.new().bold();

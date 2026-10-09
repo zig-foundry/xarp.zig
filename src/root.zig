@@ -9,11 +9,10 @@
 //! `Style` combines a foreground `Color`, a background color, and `Effects`
 //! bitflags. `{f}` writes the opening SGR sequence; `Style.writeReset` writes
 //! the reset. `Style.paint` wraps text with both. `Styles` themes help,
-//! version, and error output. `NO_COLOR` (any value, including empty) disables
-//! colors in `Styles.styled`.
+//! version, and error output. Call `Styles.styledUnless` with whether
+//! `NO_COLOR` is set; Zig 0.16 has no libc-free global getenv.
 //!
-//! Preset styles (`RED`, `BOLD`, ...) live in `style.zig`. Rust keeps them in
-//! `color.rs`, but that import would cycle with `style.zig`.
+//! Preset styles (`RED`, `BOLD`, and the rest) live in `style.zig`.
 
 const std = @import("std");
 
@@ -82,6 +81,7 @@ pub const LIME = style.LIME;
 pub const INDIGO = style.INDIGO;
 
 test {
+    // Referencing each file pulls its `test` blocks into `zig build test`.
     std.testing.refAllDecls(@This());
     std.testing.refAllDecls(@import("color.zig"));
     std.testing.refAllDecls(@import("effect.zig"));
