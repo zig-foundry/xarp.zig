@@ -1,28 +1,24 @@
-//! ```zig
-//! const eff = xarp.Effects.BOLD.bitOr(.UNDERLINE);
-//! ```
+//! Bitmask operations for ANSI text styles and font effects.
 //!
-//! Bitmask for ANSI text effects. Only the ten bits in `Effects.ALL` are valid.
-//!
-//! - Zig has no `|` / `&` / `!` overloads, so use `bitOr`, `bitAnd`, `bitNot`.
-//! - `fromBits` returns `null` on unknown bits; `fromBitsTruncate` drops them.
+//! Provides combinations of the ten valid ANSI SGR attributes defined in `Effects.ALL`.
+//! Exposes explicit bitwise helpers (`bitOr`, `bitAnd`, `bitNot`) since Zig lacks custom operator overloads.
 
 const std = @import("std");
 
-/// ANSI text style modifiers and font effects.
+/// ANSI text modifiers and font attributes.
 ///
-/// Holds a raw bitmask. Only bits in `Effects.ALL` are defined.
+/// Stores active effects in a 16-bit mask. Bits outside `Effects.ALL` are invalid.
 pub const Effects = struct {
-    /// Raw flag bits. Don't set unknown bits; `fromBits` rejects them.
+    /// Active effect bits. Do not set undefined bits directly; use `fromBits` to validate them.
     bits: u16 = 0,
 
-    /// No text effects.
+    /// No text modifiers active.
     pub const NONE: Effects = .{ .bits = 0 };
 
-    /// Bold or increased intensity.
+    /// Bold or increased font weight.
     pub const BOLD: Effects = .{ .bits = 1 << 0 };
 
-    /// Dim or decreased intensity.
+    /// Dim or reduced intensity.
     pub const DIM: Effects = .{ .bits = 1 << 1 };
 
     /// Italic text.
@@ -48,12 +44,11 @@ pub const Effects = struct {
 
     /// Double underline.
     ///
-    /// Encoded as SGR code 21. Note that some terminals interpret code 21 as
-    /// "bold off" instead of double underline, so this effect is less portable
-    /// than the others.
+    /// Encoded as SGR code 21. Note that some terminal emulators interpret code 21
+    /// as "bold off" rather than double underline.
     pub const DOUBLE_UNDERLINE: Effects = .{ .bits = 1 << 9 };
 
-    /// Mask of all defined effect bits.
+    /// Bitmask containing every defined effect.
     pub const ALL: Effects = .{ .bits = BOLD.bits |
         DIM.bits |
         ITALIC.bits |
@@ -65,15 +60,15 @@ pub const Effects = struct {
         STRIKETHROUGH.bits |
         DOUBLE_UNDERLINE.bits };
 
-    /// Creates a set containing every defined effect.
+    /// Returns a set containing all defined effects.
     pub fn all() Effects {
         return ALL;
     }
 
-    /// Converts a raw bitmask into an effect set.
+    /// Converts a raw bitmask into an `Effects` set.
     ///
-    /// Returns `null` when `bits` holds undefined bits (outside `ALL`).
-    /// Call `fromBitsTruncate` to drop undefined bits instead.
+    /// Returns `null` if `bits` contains bits outside `Effects.ALL`.
+    /// Use `fromBitsTruncate` to discard undefined bits instead.
     pub fn fromBits(bits: u16) ?Effects {
         if (bits & ~ALL.bits == 0) {
             return .{ .bits = bits };
@@ -81,65 +76,64 @@ pub const Effects = struct {
         return null;
     }
 
-    /// Converts a raw bitmask into an effect set, discarding undefined bits.
+    /// Converts a raw bitmask into an `Effects` set, masking out any undefined bits.
     pub fn fromBitsTruncate(bits: u16) Effects {
         return .{ .bits = bits & ALL.bits };
     }
 
-    /// Creates an empty set of effects.
+    /// Returns an empty set with no active effects.
     pub fn empty() Effects {
         return NONE;
     }
 
-    /// `true` when no effects are set.
+    /// Checks whether no effects are set.
     pub fn isEmpty(self: Effects) bool {
         return self.bits == 0;
     }
 
-    /// `true` when `self` holds every effect in `other`.
+    /// Checks whether `self` contains all effects set in `other`.
     pub fn contains(self: Effects, other: Effects) bool {
         return (self.bits & other.bits) == other.bits;
     }
 
-    /// Returns a copy with `other` added.
+    /// Returns a copy of this set with `other` added.
     pub fn insert(self: Effects, other: Effects) Effects {
         return .{ .bits = self.bits | other.bits };
     }
 
-    /// Returns a copy with `other` removed.
+    /// Returns a copy of this set with `other` removed.
     pub fn remove(self: Effects, other: Effects) Effects {
         return .{ .bits = self.bits & ~other.bits };
     }
 
-    /// Rust `BitOr` (`self | other`). Zig has no custom `|`.
+    /// Performs bitwise OR (`self | other`).
     pub fn bitOr(self: Effects, other: Effects) Effects {
         return self.insert(other);
     }
 
-    /// Rust `BitOrAssign` (`self |= other`).
+    /// Performs bitwise OR in-place (`self |= other`).
     pub fn bitOrAssign(self: *Effects, other: Effects) void {
         self.bits |= other.bits;
     }
 
-    /// Rust `BitAnd` (`self & other`). Zig has no custom `&`.
+    /// Performs bitwise AND (`self & other`).
     pub fn bitAnd(self: Effects, other: Effects) Effects {
         return .{ .bits = self.bits & other.bits };
     }
 
-    /// Rust `BitAndAssign` (`self &= other`).
+    /// Performs bitwise AND in-place (`self &= other`).
     pub fn bitAndAssign(self: *Effects, other: Effects) void {
         self.bits &= other.bits;
     }
 
-    /// Rust `Not` (`!self`). Flips every bit, including undefined ones.
+    /// Inverts the bitmask, including unused bits.
     pub fn bitNot(self: Effects) Effects {
         return .{ .bits = ~self.bits };
     }
 
-    /// Formats set flag names, matching Rust `Debug`.
+    /// Writes active effect names formatted like debug output.
     ///
-    /// An empty set formats as `Effects(NONE)`. Unknown bits (outside `ALL`)
-    /// are reported as a hexadecimal mask, e.g. `Effects(BOLD | 0x8000)`.
+    /// An empty set prints `Effects(NONE)`. Undefined bits are displayed as hex.
     pub fn format(self: Effects, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         if (self.isEmpty()) {
             return writer.writeAll("Effects(NONE)");

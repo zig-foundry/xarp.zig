@@ -1,83 +1,81 @@
-//! ```zig
-//! const warning = xarp.Style.new().bold().fgColor(.yellow);
-//! try writer.print("{f}{s}{s}\n", .{ warning, "disk full", xarp.RESET });
-//! ```
+//! Text styling primitives and terminal theme definitions.
 //!
-//! `Style` pairs fg/bg colors with `Effects`. `Styles` themes help and error output.
+//! Pairs foreground and background colors with bitmask text effects.
+//! Provides preset styles and the `Styles` container to format help text and error output.
 //!
-//! - Combine with `merge`; right-hand colors win, effects join.
-//! - `withColor` sets fg only when none is set.
-//! - `{f}` writes the opening `\x1b[...m`; print `RESET` to clear it.
-//! - `Styles.styled` returns plain styles when `NO_COLOR` is set.
+//! - Combine styles using `merge`. Right-hand colors override left-hand colors, while effects union together.
+//! - Use `withColor` to set a fallback foreground color when none is set.
+//! - Formatting via `{f}` emits the opening ANSI escape code. Call `writeReset` or print `RESET` to clear it.
+//! - `Styles.styled` checks `NO_COLOR` through libc `getenv` and returns unstyled text when set.
 
 const std = @import("std");
 const Color = @import("color.zig").Color;
 const RESET = @import("color.zig").RESET;
 const Effects = @import("effect.zig").Effects;
 
-/// Combined text style: effects, foreground, and background.
+/// Combined terminal style containing effects, foreground color, and background color.
 ///
-/// `fg` and `bg` are optional. `null` means no color is applied.
+/// Unset colors remain `null`. Plain styles emit no escape codes.
 pub const Style = struct {
     /// Foreground color.
     fg: ?Color = null,
     /// Background color.
     bg: ?Color = null,
-    /// Set of visual text effects.
+    /// Active bitmask text effects.
     effects: Effects = .NONE,
 
-    /// Creates a blank style with no colors or effects.
+    /// Creates an empty style with no colors or active effects.
     pub fn new() Style {
         return .{};
     }
 
-    /// `true` when no color or effects are set. Plain styles print no escape codes.
+    /// Checks if no color or effects are configured. Plain styles emit no ANSI sequences.
     pub fn isPlain(self: Style) bool {
         return self.fg == null and self.bg == null and self.effects.isEmpty();
     }
 
-    /// Sets the foreground color. Replaces any previous foreground.
+    /// Sets the foreground color, overriding any previous value.
     pub fn fgColor(self: Style, color: Color) Style {
         var next = self;
         next.fg = color;
         return next;
     }
 
-    /// Sets the background color. Replaces any previous background.
+    /// Sets the background color, overriding any previous value.
     pub fn bgColor(self: Style, color: Color) Style {
         var next = self;
         next.bg = color;
         return next;
     }
 
-    /// Adds text effects to the current style. Existing effects are kept.
+    /// Adds text effects into the existing effect bitmask.
     pub fn withEffects(self: Style, effects: Effects) Style {
         var next = self;
         next.effects = self.effects.insert(effects);
         return next;
     }
 
-    /// Applies bold styling.
+    /// Adds the bold text effect.
     pub fn bold(self: Style) Style {
         return self.withEffects(.BOLD);
     }
 
-    /// Applies dim (faint) styling.
+    /// Adds the dim (faint) text effect.
     pub fn dim(self: Style) Style {
         return self.withEffects(.DIM);
     }
 
-    /// Applies italic styling.
+    /// Adds the italic text effect.
     pub fn italic(self: Style) Style {
         return self.withEffects(.ITALIC);
     }
 
-    /// Applies single underline styling.
+    /// Adds a single underline text effect.
     pub fn underline(self: Style) Style {
         return self.withEffects(.UNDERLINE);
     }
 
-    /// Applies slow blink styling.
+    /// Adds a slow blinking text effect.
     pub fn blink(self: Style) Style {
         return self.withEffects(.BLINK);
     }
@@ -87,22 +85,22 @@ pub const Style = struct {
         return self.withEffects(.INVERT);
     }
 
-    /// Hides the text.
+    /// Hides output text.
     pub fn hidden(self: Style) Style {
         return self.withEffects(.HIDDEN);
     }
 
-    /// Applies strikethrough (crossed-out) styling.
+    /// Adds a strikethrough line across text.
     pub fn strikethrough(self: Style) Style {
         return self.withEffects(.STRIKETHROUGH);
     }
 
-    /// Applies double underline styling.
+    /// Adds a double underline text effect.
     pub fn doubleUnderline(self: Style) Style {
         return self.withEffects(.DOUBLE_UNDERLINE);
     }
 
-    /// Merges two styles. Right-hand `fg` and `bg` win when set; effects are united.
+    /// Merges two styles. Colors in `rhs` take precedence when present, and effects union together.
     pub fn merge(self: Style, rhs: Style) Style {
         return .{
             .fg = rhs.fg orelse self.fg,
@@ -111,27 +109,22 @@ pub const Style = struct {
         };
     }
 
-    /// Sets the foreground when `self` does not already have one.
+    /// Sets the foreground color only when `self` lacks an existing foreground color.
     pub fn withColor(self: Style, color: Color) Style {
         return Style.new().fgColor(color).merge(self);
     }
 
-    /// Wraps text so formatting applies this style and then resets.
-    ///
-    /// `Style` is copied, so a temporary can be painted directly:
-    /// `Style.new().bold().paint("hi")`.
+    /// Wraps a borrowed string slice with this style and appends an ANSI reset sequence.
     pub fn paint(self: Style, text: []const u8) StyledText {
         return .{ .style = self, .text = text };
     }
 
-    /// Writes the opening SGR sequence (`\x1b[...m`), or nothing if plain.
-    ///
-    /// This is the `{f}` hook. Reset is separate: see `writeReset`.
+    /// Formats the opening SGR sequence (`\x1b[...m`) via `{f}`. Does nothing when plain.
     pub fn format(self: Style, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try self.writeAnsi(writer);
     }
 
-    /// Writes the ANSI reset sequence `\x1b[0m`.
+    /// Writes the standard ANSI reset sequence (`\x1b[0m`) to clear terminal styling.
     pub fn writeReset(writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.writeAll(RESET);
     }
@@ -178,14 +171,14 @@ fn writeCode(writer: *std.Io.Writer, first: *bool, code: u8) std.Io.Writer.Error
     try writer.print("{d}", .{code});
 }
 
-/// Helper returned by `Style.paint`. Owns a copy of the style.
+/// Helper struct returned by `Style.paint`. Wraps text with styling escape codes.
 pub const StyledText = struct {
-    /// Style applied around `text`.
+    /// Style applied to the wrapped text.
     style: Style,
-    /// Raw text to wrap. Borrowed; must outlive the print call.
+    /// Borrowed text slice. Must outlive the print operation.
     text: []const u8,
 
-    /// Writes style codes + text + reset, or plain text when the style is empty.
+    /// Writes opening style codes, text content, and terminal reset sequences.
     pub fn format(self: StyledText, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         if (self.style.isPlain()) {
             try writer.writeAll(self.text);
@@ -197,49 +190,45 @@ pub const StyledText = struct {
     }
 };
 
-/// Styling configuration for help, usage, and error output.
+/// Color palette configuration used for help guides and CLI diagnostic output.
 pub const Styles = struct {
-    /// Style applied to section headers.
+    /// Style applied to section titles and framing bars.
     header: Style = .{},
-    /// Style applied to usage instructions.
+    /// Style applied to command usage instructions.
     usage: Style = .{},
-    /// Style applied to command literals and flags.
+    /// Style applied to flags, options, and literals.
     literal: Style = .{},
-    /// Style applied to argument value placeholders.
+    /// Style applied to argument placeholders and value labels.
     placeholder: Style = .{},
-    /// Style applied to error messages.
-    ///
-    /// Named `@"error"` because `error` is a keyword.
+    /// Style applied to error labels and fatal error messages.
     @"error": Style = .{},
-    /// Style applied to valid values or states.
+    /// Style applied to successful badges and valid choices.
     valid: Style = .{},
-    /// Style applied to invalid values or warnings.
+    /// Style applied to invalid values and highlighted warnings.
     invalid: Style = .{},
-    /// Style applied to warning messages.
+    /// Style applied to warnings and required tags.
     warning: Style = .{},
-    /// Style applied to secondary or dimmed text.
+    /// Style applied to secondary descriptions and dimmed tips.
     muted: Style = .{},
 
-    /// Returns uncolored / plain styles.
+    /// Returns empty styles without color or text effects.
     pub fn plain() Styles {
         return .{};
     }
 
-    /// Default styled theme. Returns plain styles when `NO_COLOR` is set.
-    ///
-    /// Presence alone disables color; an empty value still counts.
+    /// Returns styled defaults unless `NO_COLOR` is present in the process environment.
     pub fn styled() Styles {
         if (std.c.getenv("NO_COLOR") != null) return plain();
         return themed();
     }
 
-    /// Returns plain styles when `no_color` is true, else the default theme.
+    /// Returns plain styles when `no_color` is true; otherwise returns the themed defaults.
     pub fn styledUnless(no_color: bool) Styles {
         if (no_color) return plain();
         return themed();
     }
 
-    /// The color theme. Skips the `NO_COLOR` check.
+    /// Returns the standard colored theme directly, ignoring `NO_COLOR`.
     pub fn themed() Styles {
         return .{
             .header = Style.new().bold().underline(),
@@ -254,63 +243,63 @@ pub const Styles = struct {
         };
     }
 
-    /// Replaces the header slot.
+    /// Sets the header style slot.
     pub fn setHeader(self: Styles, style: Style) Styles {
         var next = self;
         next.header = style;
         return next;
     }
 
-    /// Replaces the usage slot.
+    /// Sets the usage style slot.
     pub fn setUsage(self: Styles, style: Style) Styles {
         var next = self;
         next.usage = style;
         return next;
     }
 
-    /// Replaces the literal slot.
+    /// Sets the literal style slot.
     pub fn setLiteral(self: Styles, style: Style) Styles {
         var next = self;
         next.literal = style;
         return next;
     }
 
-    /// Replaces the placeholder slot.
+    /// Sets the placeholder style slot.
     pub fn setPlaceholder(self: Styles, style: Style) Styles {
         var next = self;
         next.placeholder = style;
         return next;
     }
 
-    /// Replaces the error slot.
+    /// Sets the error style slot.
     pub fn setError(self: Styles, style: Style) Styles {
         var next = self;
         next.@"error" = style;
         return next;
     }
 
-    /// Replaces the valid slot.
+    /// Sets the valid choice style slot.
     pub fn setValid(self: Styles, style: Style) Styles {
         var next = self;
         next.valid = style;
         return next;
     }
 
-    /// Replaces the invalid slot.
+    /// Sets the invalid choice style slot.
     pub fn setInvalid(self: Styles, style: Style) Styles {
         var next = self;
         next.invalid = style;
         return next;
     }
 
-    /// Replaces the warning slot.
+    /// Sets the warning style slot.
     pub fn setWarning(self: Styles, style: Style) Styles {
         var next = self;
         next.warning = style;
         return next;
     }
 
-    /// Replaces the muted slot.
+    /// Sets the muted text style slot.
     pub fn setMuted(self: Styles, style: Style) Styles {
         var next = self;
         next.muted = style;
@@ -318,66 +307,66 @@ pub const Styles = struct {
     }
 };
 
-// Preset styles. Kept here so `color.zig` does not import this file.
+// Preset style constants.
 
-/// Preset style with bold text effect.
+/// Preset bold effect.
 pub const BOLD: Style = Style.new().bold();
-/// Preset style with dim (faint) text effect.
+/// Preset dim effect.
 pub const DIM: Style = Style.new().dim();
-/// Preset style with italic text effect.
+/// Preset italic effect.
 pub const ITALIC: Style = Style.new().italic();
-/// Preset style with underline text effect.
+/// Preset underline effect.
 pub const UNDERLINE: Style = Style.new().underline();
 
-/// Preset style with foreground standard black.
+/// Preset standard black foreground.
 pub const BLACK: Style = Style.new().fgColor(.black);
-/// Preset style with foreground standard red.
+/// Preset standard red foreground.
 pub const RED: Style = Style.new().fgColor(.red);
-/// Preset style with foreground standard green.
+/// Preset standard green foreground.
 pub const GREEN: Style = Style.new().fgColor(.green);
-/// Preset style with foreground standard yellow.
+/// Preset standard yellow foreground.
 pub const YELLOW: Style = Style.new().fgColor(.yellow);
-/// Preset style with foreground standard blue.
+/// Preset standard blue foreground.
 pub const BLUE: Style = Style.new().fgColor(.blue);
-/// Preset style with foreground standard magenta.
+/// Preset standard magenta foreground.
 pub const MAGENTA: Style = Style.new().fgColor(.magenta);
-/// Preset style with foreground standard cyan.
+/// Preset standard cyan foreground.
 pub const CYAN: Style = Style.new().fgColor(.cyan);
-/// Preset style with foreground standard white.
+/// Preset standard white foreground.
 pub const WHITE: Style = Style.new().fgColor(.white);
 
-/// Preset style with foreground bright black (gray / charcoal).
+/// Preset bright black foreground.
 pub const BRIGHT_BLACK: Style = Style.new().fgColor(.bright_black);
-/// Preset style with foreground bright red.
+/// Preset bright red foreground.
 pub const BRIGHT_RED: Style = Style.new().fgColor(.bright_red);
-/// Preset style with foreground bright green.
+/// Preset bright green foreground.
 pub const BRIGHT_GREEN: Style = Style.new().fgColor(.bright_green);
-/// Preset style with foreground bright yellow.
+/// Preset bright yellow foreground.
 pub const BRIGHT_YELLOW: Style = Style.new().fgColor(.bright_yellow);
-/// Preset style with foreground bright blue.
+/// Preset bright blue foreground.
 pub const BRIGHT_BLUE: Style = Style.new().fgColor(.bright_blue);
-/// Preset style with foreground bright magenta.
+/// Preset bright magenta foreground.
 pub const BRIGHT_MAGENTA: Style = Style.new().fgColor(.bright_magenta);
-/// Preset style with foreground bright cyan.
+/// Preset bright cyan foreground.
 pub const BRIGHT_CYAN: Style = Style.new().fgColor(.bright_cyan);
-/// Preset style with foreground bright white.
+/// Preset bright white foreground.
 pub const BRIGHT_WHITE: Style = Style.new().fgColor(.bright_white);
 
-/// Preset style with foreground orange.
+/// Preset orange foreground.
 pub const ORANGE: Style = Style.new().fgColor(.orange);
-/// Preset style with foreground purple.
+/// Preset purple foreground.
 pub const PURPLE: Style = Style.new().fgColor(.purple);
-/// Preset style with foreground pink.
+/// Preset pink foreground.
 pub const PINK: Style = Style.new().fgColor(.pink);
-/// Preset style with foreground teal.
+/// Preset teal foreground.
 pub const TEAL: Style = Style.new().fgColor(.teal);
-/// Preset style with foreground gold.
+/// Preset gold foreground.
 pub const GOLD: Style = Style.new().fgColor(.gold);
-/// Preset style with foreground silver.
+/// Preset silver foreground.
 pub const SILVER: Style = Style.new().fgColor(.silver);
-/// Preset style with foreground lime.
+/// Preset lime foreground.
 pub const LIME: Style = Style.new().fgColor(.lime);
-/// Preset style with foreground indigo.
+/// Preset indigo foreground.
 pub const INDIGO: Style = Style.new().fgColor(.indigo);
 
 // === Tests ===
@@ -552,7 +541,7 @@ test "theme setters replace slots" {
     try std.testing.expect(custom.usage.isPlain());
 }
 
-test "themed slots match the clap-like theme" {
+test "themed slots match default colors" {
     const theme = Styles.themed();
     try std.testing.expect(theme.header.effects.contains(.BOLD));
     try std.testing.expect(theme.header.effects.contains(.UNDERLINE));

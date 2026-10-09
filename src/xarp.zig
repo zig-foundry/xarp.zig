@@ -1,18 +1,12 @@
-//! ```zig
-//! var app = Xarp.new(allocator, "demo");
-//! defer app.deinit();
-//! try app.addArg(Arg.new("input").setRequired(true));
-//! var outcome = try app.tryGetMatchesFrom(argv);
-//! defer outcome.deinit(allocator);
-//! ```
+//! Core command-line parser and matching engine.
 //!
-//! Parses argv into `ArgMatches`. Returns `Outcome`: `.matches` or `.err`.
-//! `try` only signals allocation failure; help, version, and bad input
-//! come back as `.err` so you can print them yourself.
+//! Parses argv slices into `ArgMatches` values. Functions return `Outcome`,
+//! which contains either `.matches` on success or `.err` for help text,
+//! version output, and parse errors. Only allocator failures propagate as Zig errors.
 //!
-//! - Borrowed strings (`id`, help, defaults) must outlive the parser; literals do.
-//! - Parsed values are copied; call `deinit` on both `Xarp` and `Outcome`.
-//! - `tryGetMatchesWithEnv` reads only the map you pass; `tryGetMatchesFrom` reads libc `getenv`.
+//! - Borrowed strings (`id`, help strings, defaults) must outlive the parser.
+//! - Parsed values are copied to the heap; call `deinit` on `Xarp` and `Outcome`.
+//! - `tryGetMatchesWithEnv` uses only the passed map; `tryGetMatchesFrom` calls libc `getenv`.
 
 const std = @import("std");
 const Style = @import("style.zig").Style;
@@ -20,17 +14,17 @@ const Styles = @import("style.zig").Styles;
 const RESET = @import("color.zig").RESET;
 const XarpError = @import("errors.zig").XarpError;
 
-/// Env map for `tryGetMatchesWithEnv`. Missing keys count as unset.
+/// Environment map for `tryGetMatchesWithEnv`. Missing keys count as unset.
 pub const EnvMap = std.StringHashMapUnmanaged([]const u8);
 
-/// Parse result. `.matches` holds values; `.err` holds help, version, or parse text.
+/// Parse outcome. Holds `.matches` on success, or `.err` for help, version, and error text.
 pub const Outcome = union(enum) {
-    /// Successful parse. Read flags and values from here.
+    /// Successful parse. Read flags, options, and positionals from here.
     matches: ArgMatches,
-    /// Help, version, or parse failure. Print `err.message()`.
+    /// Help display, version display, or CLI parse failure.
     err: XarpError,
 
-    /// `true` for `.matches`, `false` for `.err`.
+    /// Returns `true` if parsing succeeded.
     pub fn isOk(self: Outcome) bool {
         return switch (self) {
             .matches => true,
@@ -38,7 +32,7 @@ pub const Outcome = union(enum) {
         };
     }
 
-    /// Frees stored values and the subcommand. Call it or you leak memory.
+    /// Frees stored values and subcommands. Call this or you will leak memory.
     pub fn deinit(self: *Outcome, allocator: std.mem.Allocator) void {
         switch (self.*) {
             .matches => |*matches| matches.deinit(),
@@ -47,136 +41,137 @@ pub const Outcome = union(enum) {
     }
 };
 
-/// Specifies the parsing action to take when an argument is encountered.
+/// Action taken when the parser matches an argument.
 pub const ArgAction = enum {
     /// Flag without a value (`-v`, `--verbose`). Sets the flag to `true`.
     set_true,
-    /// Option or positional that captures a single value. Last occurrence wins.
+    /// Option or positional capturing a single value. The last occurrence wins.
     set,
-    /// Collects every occurrence. On a positional, only the last one may append.
+    /// Collects every occurrence. Only the final positional argument can use this.
     append,
 };
 
-/// A command-line argument definition. Copy it with `with*` builders, then pass to `addArg`.
+/// Command-line argument definition. Configure with builder methods, then pass to `addArg`.
 pub const Arg = struct {
-    /// Unique identifier. Must outlive the matches (a string literal is fine).
+    /// Identifier key. Must remain valid while reading matches (literals work fine).
     id: []const u8,
-    /// Short single-byte flag (`'v'` for `-v`).
+    /// Short single-character flag (`'v'` for `-v`).
     short: ?u8 = null,
-    /// Long flag name (`"verbose"` for `--verbose`).
+    /// Long flag string (`"verbose"` for `--verbose`).
     long: ?[]const u8 = null,
-    /// Description displayed in help messages.
+    /// Description shown in help output.
     help: ?[]const u8 = null,
-    /// Placeholder name displayed in help messages.
+    /// Value placeholder shown in help output (`<PATH>`).
     value_name: ?[]const u8 = null,
-    /// Whether the argument must be supplied by the user.
+    /// Marks the argument as required.
     required: bool = false,
-    /// Parsing action performed when this argument is encountered.
+    /// Action executed when this argument appears.
     action: ArgAction = .set,
-    /// Fallback used when the argument is not explicitly provided.
+    /// Fallback value used when CLI and environment variables omit this argument.
     default_value: ?[]const u8 = null,
-    /// Environment variable used when the argument is not explicitly passed.
+    /// Environment variable checked if the argument is omitted from the CLI.
     env: ?[]const u8 = null,
-    /// Allowed input choices. The slice must outlive the parser.
+    /// Allowed input choices. Input outside this slice causes a parse failure.
     possible_values: []const []const u8 = &.{},
-    /// IDs of arguments that cannot be supplied alongside this one.
+    /// Argument IDs that cannot appear alongside this argument.
     conflicts_with: std.ArrayListUnmanaged([]const u8) = .empty,
 
-    /// Starts a definition. `id` must stay alive as long as matches are used.
+    /// Creates an argument definition. `id` must outlive the parsed results.
     pub fn new(id: []const u8) Arg {
         return .{ .id = id };
     }
 
-    /// Limits values to `values`. Bad input fails parsing; defaults are checked too.
+    /// Restricts inputs to `values`. The slice must outlive the parser.
     pub fn withPossibleValues(self: Arg, values: []const []const u8) Arg {
         var next = self;
         next.possible_values = values;
         return next;
     }
 
-    /// Reads this arg from `env_var` when the CLI omits it. CLI input always wins.
+    /// Sets an environment variable fallback. CLI arguments always take precedence.
     pub fn withEnv(self: Arg, env_var: []const u8) Arg {
         var next = self;
         next.env = env_var;
         return next;
     }
 
-    /// Marks `other_id` as conflicting. Pass both and parsing fails. Defaults don't count.
+    /// Declares an argument conflict. Passing both arguments triggers a parse failure.
     pub fn conflictsWith(self: *Arg, allocator: std.mem.Allocator, other_id: []const u8) !void {
         try self.conflicts_with.append(allocator, other_id);
     }
 
-    /// Sets `-x`. Must not be `-`, `=`, whitespace, or a duplicate.
+    /// Sets a short flag (`-x`). Must not be `-`, `=`, or whitespace.
     pub fn withShort(self: Arg, short: u8) Arg {
         var next = self;
         next.short = short;
         return next;
     }
 
-    /// Sets `--name`. Must not be empty, start with `-`, or contain `=` / spaces.
+    /// Sets a long flag (`--name`). Must not start with `-` or contain `=` or whitespace.
     pub fn withLong(self: Arg, long: []const u8) Arg {
         var next = self;
         next.long = long;
         return next;
     }
 
-    /// Help text shown in the Flags & Options list.
+    /// Sets the help description.
     pub fn withHelp(self: Arg, help: []const u8) Arg {
         var next = self;
         next.help = help;
         return next;
     }
 
-    /// Placeholder shown in help (`<PATH>`). Falls back to `id` when unset.
+    /// Sets the value placeholder displayed in help text. Falls back to `id` if unset.
     pub fn withValueName(self: Arg, name: []const u8) Arg {
         var next = self;
         next.value_name = name;
         return next;
     }
 
-    /// `true` fails parsing when no CLI value, env value, or default exists.
+    /// Marks the argument as required.
     pub fn setRequired(self: Arg, required: bool) Arg {
         var next = self;
         next.required = required;
         return next;
     }
 
-    /// Picks `.set_true` (flag), `.set` (single value, last wins), or `.append` (collects all).
+    /// Sets the matching action (`.set_true`, `.set`, or `.append`).
     pub fn withAction(self: Arg, action: ArgAction) Arg {
         var next = self;
         next.action = action;
         return next;
     }
 
-    /// Fallback value when CLI and env both omit the arg. Never triggers conflicts.
+    /// Sets the fallback value. Default values never trigger conflict errors.
     pub fn withDefault(self: Arg, default: []const u8) Arg {
         var next = self;
         next.default_value = default;
         return next;
     }
 
-    /// `true` when no short or long flag is set. Positionals fill in declaration order.
+    /// Returns `true` if this argument has neither a short nor a long flag.
     pub fn isPositional(self: Arg) bool {
         return self.short == null and self.long == null;
     }
 };
 
-/// Parsed flags, values, and an optional subcommand. Call `deinit` or you leak copies.
+/// Stores parsed flags, options, positionals, and subcommands.
 pub const ArgMatches = struct {
-    /// Backing allocator for value copies. Don't swap it after parsing.
+    /// Allocator used for value copies.
     allocator: std.mem.Allocator,
-    /// Set flags by arg `id`. Read with `getFlag`; don't write directly.
+    /// Tracks active flags.
     flags: std.StringHashMapUnmanaged(void) = .empty,
-    /// Stored values by arg `id`. Read with `getOne` / `getMany`; don't write directly.
+    /// Stores parsed values by argument ID.
     values: std.StringHashMapUnmanaged(std.ArrayListUnmanaged([]u8)) = .empty,
-    /// Matched subcommand, if any. Read with `getSubcommand`.
+    /// Matched subcommand, if present.
     subcommand: ?Subcommand = null,
 
     const Subcommand = struct {
         name: []u8,
         matches: *ArgMatches,
     };
-    /// Frees value copies and the boxed subcommand.
+
+    /// Releases all copied values and allocated subcommands.
     pub fn deinit(self: *ArgMatches) void {
         self.flags.deinit(self.allocator);
         var values = self.values.iterator();
@@ -192,52 +187,45 @@ pub const ArgMatches = struct {
         }
     }
 
-    /// `true` when the `.set_true` flag was passed (or enabled via env/default).
+    /// Returns `true` if the flag was supplied or enabled via defaults.
     pub fn getFlag(self: *const ArgMatches, id: []const u8) bool {
         return self.flags.contains(id);
     }
 
-    /// First value, or `null` when absent. Returns the raw string; use `tryGetOne` for typed values.
+    /// Returns the first value for an argument, or `null` if missing.
     pub fn getOne(self: *const ArgMatches, id: []const u8) ?[]const u8 {
         const list = self.values.get(id) orelse return null;
         if (list.items.len == 0) return null;
         return list.items[0];
     }
 
-    /// All stored values. Borrowed from matches; don't free them. `null` when absent.
+    /// Returns all values for an argument. Values are borrowed from the matches struct.
     pub fn getMany(self: *const ArgMatches, id: []const u8) ?[]const []u8 {
         const list = self.values.get(id) orelse return null;
         return list.items;
     }
 
-    /// Suffix added so typed failures point at `--help` like other parse errors.
     const try_help_hint = "\n\nFor more information, try '--help'.";
 
-    /// Parses the first value as `T`. Returns `null` when absent, `InvalidValue` on bad input.
-    ///
-    /// ```zig
-    /// const port = (try matches.tryGetOne(u16, "port")) orelse 8080;
-    /// ```
-    ///
-    /// Bools need exactly `"true"` / `"false"`; ints and floats use `std.fmt` rules.
+    /// Parses the first value as type `T`. Returns `null` if absent, or `error.InvalidValue` on failure.
     pub fn tryGetOne(self: *const ArgMatches, comptime T: type, id: []const u8) error{InvalidValue}!?T {
         const raw = self.getOne(id) orelse return null;
         return parseValue(T, raw) orelse error.InvalidValue;
     }
 
-    /// Builds the parse message for a bad typed value. Caller owns the returned error.
+    /// Builds a formatted parse error for an invalid typed value. Caller owns the returned error.
     pub fn valueError(self: *const ArgMatches, id: []const u8, raw: []const u8) !XarpError {
         const msg = try std.fmt.allocPrint(self.allocator, "invalid value '{s}' for '{s}'{s}", .{ raw, id, try_help_hint });
         return .{ .parse = msg };
     }
 
-    /// First value parsed as `T`. Returns `null` when absent or when parsing fails.
+    /// Parses the first value as `T`. Returns `null` if absent or if parsing fails.
     pub fn getOneParsed(self: *const ArgMatches, comptime T: type, id: []const u8) ?T {
         const raw = self.getOne(id) orelse return null;
         return parseValue(T, raw);
     }
 
-    /// Fills `out` with values that parse; skips bad ones. Returns `null` when absent.
+    /// Populates `out` with values that parse successfully, skipping unparseable items.
     pub fn getManyParsed(self: *const ArgMatches, comptime T: type, id: []const u8, out: []T) ?[]T {
         const raws = self.getMany(id) orelse return null;
         var n: usize = 0;
@@ -251,7 +239,8 @@ pub const ArgMatches = struct {
         return out[0..n];
     }
 
-    /// Strict multi-value parse. Fails with `InvalidValue` on the first bad item, `ShortBuffer` when `out` is too small.
+    /// Parses all values strictly into `out`. Fails with `InvalidValue` on the first bad item,
+    /// or `ShortBuffer` if `out` is smaller than the item count.
     pub fn tryGetMany(self: *const ArgMatches, comptime T: type, id: []const u8, out: []T) error{ InvalidValue, ShortBuffer }!?[]T {
         const raws = self.getMany(id) orelse return null;
         if (out.len < raws.len) return error.ShortBuffer;
@@ -261,18 +250,16 @@ pub const ArgMatches = struct {
         return out[0..raws.len];
     }
 
-    /// Matched subcommand name and its matches. `null` when no subcommand was passed.
+    /// Returns the matched subcommand name and nested matches, or `null` if none matched.
     pub fn getSubcommand(self: *const ArgMatches) ?struct { []const u8, *const ArgMatches } {
         const sub = self.subcommand orelse return null;
         return .{ sub.name, sub.matches };
     }
 
-    // Records a `.set_true` flag.
     fn setFlag(self: *ArgMatches, id: []const u8) !void {
         try self.flags.put(self.allocator, id, {});
     }
 
-    // Stores a single value, replacing any prior one. Copies `raw`.
     fn setValue(self: *ArgMatches, id: []const u8, raw: []const u8) !void {
         const copy = try self.allocator.dupe(u8, raw);
         errdefer self.allocator.free(copy);
@@ -287,7 +274,6 @@ pub const ArgMatches = struct {
         try self.values.put(self.allocator, id, list);
     }
 
-    // Appends one value, keeping prior ones. Copies `raw`.
     fn appendValue(self: *ArgMatches, id: []const u8, raw: []const u8) !void {
         const copy = try self.allocator.dupe(u8, raw);
         errdefer self.allocator.free(copy);
@@ -315,24 +301,24 @@ fn parseValue(comptime T: type, raw: []const u8) ?T {
     }
 }
 
-/// App config and parser. Build it, add args, then call a `tryGetMatches*` variant.
+/// Parser configuration and runner.
 pub const Xarp = struct {
-    /// Backing allocator for help text and stored definitions.
+    /// Backing allocator for argument metadata and help rendering.
     allocator: std.mem.Allocator,
-    /// Program name. Shows in help, version, and usage lines.
+    /// Binary or command name shown in usage lines.
     name: []const u8,
-    /// Version string for `-V` / `--version`. `null` disables the flag.
+    /// Version text for `-V` / `--version`. Set to `null` to disable version flags.
     version: ?[]const u8 = null,
-    /// One-line description at the top of `--help`.
+    /// Description placed at the top of help text.
     about: ?[]const u8 = null,
-    /// Theme for help and error output.
+    /// Output style theme.
     styles: Styles,
-    /// Registered argument definitions. Fill with `addArg` / `addArgs`.
+    /// Registered arguments.
     args: std.ArrayListUnmanaged(Arg) = .empty,
-    /// Registered nested commands. Fill with `addSubcommand`.
+    /// Registered subcommands.
     subcommands: std.ArrayListUnmanaged(Xarp) = .empty,
 
-    /// Starts a parser. `name` shows in help and version output.
+    /// Creates a parser instance.
     pub fn new(allocator: std.mem.Allocator, name: []const u8) Xarp {
         return .{
             .allocator = allocator,
@@ -341,7 +327,7 @@ pub const Xarp = struct {
         };
     }
 
-    /// Frees arg conflict lists and subcommands. Stored values live in `ArgMatches`, not here.
+    /// Releases argument definitions and subcommand trees.
     pub fn deinit(self: *Xarp) void {
         for (self.args.items) |*arg| arg.conflicts_with.deinit(self.allocator);
         self.args.deinit(self.allocator);
@@ -349,49 +335,44 @@ pub const Xarp = struct {
         self.subcommands.deinit(self.allocator);
     }
 
-    /// Sets the version string shown by `-V` / `--version`.
+    /// Sets the application version string.
     pub fn withVersion(self: Xarp, version: []const u8) Xarp {
         var next = self;
         next.version = version;
         return next;
     }
 
-    /// Sets the one-line description shown at the top of `--help`.
+    /// Sets the description line displayed in help output.
     pub fn withAbout(self: Xarp, about: []const u8) Xarp {
         var next = self;
         next.about = about;
         return next;
     }
 
-    /// Replaces the help/error theme. Use `Styles.plain()` to disable colors.
+    /// Overrides the output styling theme. Pass `Styles.plain()` to disable colors.
     pub fn withStyles(self: Xarp, styles: Styles) Xarp {
         var next = self;
         next.styles = styles;
         return next;
     }
 
-    /// Adds one argument definition.
+    /// Adds a single argument definition.
     pub fn addArg(self: *Xarp, arg: Arg) !void {
         try self.args.append(self.allocator, arg);
     }
 
-    /// Adds several argument definitions at once.
+    /// Adds multiple argument definitions.
     pub fn addArgs(self: *Xarp, args: []const Arg) !void {
         try self.args.appendSlice(self.allocator, args);
     }
 
-    /// Registers a nested command. The first positional token matching `sub.name` routes to it.
+    /// Registers a child subcommand.
     pub fn addSubcommand(self: *Xarp, sub: Xarp) !void {
         try self.subcommands.append(self.allocator, sub);
     }
 
-    /// Parses `argv` (argv[0] is the program name) or exits.
-    /// Help and version exit `0`; parse failures exit `2`.
-    ///
-    /// ```zig
-    /// const argv = try init.minimal.args.toSlice(allocator);
-    /// var matches = try app.getMatches(argv);
-    /// ```
+    /// Parses `argv` and exits the process immediately on error or when printing help/version.
+    /// Exits with code 0 on help/version, or code 2 on parse errors.
     pub fn getMatches(self: *const Xarp, argv: []const []const u8) !ArgMatches {
         switch (try self.parseImpl(argv, null)) {
             .matches => |matches| return matches,
@@ -405,21 +386,12 @@ pub const Xarp = struct {
         }
     }
 
-    /// Parses `argv` without exiting. Check `.matches` vs `.err` yourself.
-    /// Call `outcome.deinit(allocator)` when done or you leak buffers.
+    /// Parses arguments without exiting. Inspect `.matches` or `.err` on the returned `Outcome`.
     pub fn tryGetMatchesFrom(self: *const Xarp, argv: []const []const u8) !Outcome {
         return self.parseImpl(argv, null);
     }
 
-    /// Parses with an explicit env map. `env_map` is the only env source; missing keys count as unset.
-    ///
-    /// ```zig
-    /// var env: EnvMap = .empty;
-    /// var out = try app.tryGetMatchesWithEnv(argv, &env);
-    /// ```
-    ///
-    /// Build the map from `init.environ_map` in real code. Tests pass a small literal map
-    /// so host variables don't leak into results.
+    /// Parses arguments using a specific environment map instead of reading process environment variables.
     pub fn tryGetMatchesWithEnv(self: *const Xarp, argv: []const []const u8, env_map: *const EnvMap) !Outcome {
         return self.parseImpl(argv, env_map);
     }
@@ -765,7 +737,7 @@ pub const Xarp = struct {
         return null;
     }
 
-    /// Writes `name version` to stdout. Caller keeps ownership; nothing to free.
+    /// Prints `name version` to standard output.
     pub fn printVersion(self: *const Xarp) !void {
         const text = try self.renderVersion();
         defer self.allocator.free(text);
@@ -773,14 +745,14 @@ pub const Xarp = struct {
         writeAll(1, "\n");
     }
 
-    /// Writes rendered help to stdout. Caller keeps ownership; nothing to free.
+    /// Prints formatted help text to standard output.
     pub fn printHelp(self: *const Xarp) !void {
         const text = try self.renderHelp();
         defer self.allocator.free(text);
         writeAll(1, text);
     }
 
-    /// Renders `name version`. Caller must free the returned slice.
+    /// Renders `name version`. The caller must free the returned buffer.
     pub fn renderVersion(self: *const Xarp) ![]u8 {
         var buf = Buf.init(self.allocator);
         errdefer buf.deinit();
@@ -790,7 +762,7 @@ pub const Xarp = struct {
         return buf.toOwned();
     }
 
-    /// Renders full help text. Caller must free the returned slice.
+    /// Renders formatted help text. The caller must free the returned buffer.
     pub fn renderHelp(self: *const Xarp) ![]u8 {
         var buf = Buf.init(self.allocator);
         errdefer buf.deinit();
