@@ -1,6 +1,6 @@
 const std = @import("std");
 
-// Library links libc for `getenv` (`NO_COLOR` + env fallbacks).
+// Links libc so getenv can read NO_COLOR and argument environment fallbacks.
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -26,14 +26,15 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(exe);
 
-    const run_step = b.step("run", "Run the app");
+    const run_step = b.step("run", "Run the demo executable");
     const run_cmd = b.addRunArtifact(exe);
     run_step.dependOn(&run_cmd.step);
     run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| run_cmd.addArgs(args);
+    if (b.args) |args| {
+        run_cmd.addArgs(args);
+    }
 
-    // `root.zig` re-exports every module, so one test run covers color,
-    // effect, style, errors, and xarp.
+    // root.zig re-exports every submodule, so one test runner tests the entire codebase.
     const mod_tests = b.addTest(.{
         .root_module = mod,
     });
@@ -44,11 +45,11 @@ pub fn build(b: *std.Build) void {
     });
     const run_exe_tests = b.addRunArtifact(exe_tests);
 
-    const test_step = b.step("test", "Run tests");
+    const test_step = b.step("test", "Run library and executable unit tests");
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
 
-    // `zig build docs` writes HTML docs to `zig-out/docs`.
+    // Emits HTML documentation into zig-out/docs.
     const docs_lib = b.addLibrary(.{
         .name = "xarp_zig",
         .root_module = mod,
@@ -59,6 +60,6 @@ pub fn build(b: *std.Build) void {
         .install_dir = .prefix,
         .install_subdir = "docs",
     });
-    const docs_step = b.step("docs", "Emit HTML docs to zig-out/docs");
+    const docs_step = b.step("docs", "Emit HTML documentation to zig-out/docs");
     docs_step.dependOn(&install_docs.step);
 }
