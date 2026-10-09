@@ -1,18 +1,13 @@
 //! # Xarp
 //!
-//! A zero-dependency command-line argument parser with a
-//! self-contained ANSI styling engine (24 named colors, 8-bit 256-color,
-//! and 24-bit TrueColor).
+//! Official Zig port of the Rust `xarp` crate: a command-line argument
+//! parser with a self-contained ANSI styling engine (24 named colors,
+//! 8-bit 256-color, and 24-bit TrueColor).
 //!
-//! ## Terminal styling
-//!
-//! `Style` combines a foreground `Color`, a background color, and `Effects`
-//! bitflags. `{f}` writes the opening SGR sequence; `Style.writeReset` writes
-//! the reset. `Style.paint` wraps text with both. `Styles` themes help,
-//! version, and error output. Call `Styles.styledUnless` with whether
-//! `NO_COLOR` is set; Zig 0.16 has no libc-free global getenv.
-//!
-//! Preset styles (`RED`, `BOLD`, and the rest) live in `style.zig`.
+//! Operators and trait returns from the Rust crate are methods here.
+//! `merge` and `bitOr` replace `|`. `Outcome` carries help, version, and
+//! parse text. Call `deinit` on owned results. `Styles.styled` reads
+//! `NO_COLOR` through libc `getenv`. Pass argv from `init.minimal.args`.
 
 const std = @import("std");
 

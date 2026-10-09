@@ -191,10 +191,36 @@ pub const ArgMatches = struct {
     const try_help_hint = "\n\nFor more information, try '--help'.";
 
     /// `null` if absent. `InvalidValue` if a supplied value does not parse as `T`.
-    /// `T` may be `[]const u8`, `bool` (`"true"` / `"false"` only), or an integer.
+    /// Call `valueError` for the message, which includes the `--help` hint.
     pub fn tryGetOne(self: *const ArgMatches, comptime T: type, id: []const u8) error{InvalidValue}!?T {
         const raw = self.getOne(id) orelse return null;
         return parseValue(T, raw) orelse error.InvalidValue;
+    }
+
+    /// Parse failure message for a supplied value. Includes the `--help` hint.
+    pub fn valueError(self: *const ArgMatches, id: []const u8, raw: []const u8) !XarpError {
+        const msg = try std.fmt.allocPrint(self.allocator, "invalid value '{s}' for '{s}'{s}", .{ raw, id, try_help_hint });
+        return .{ .parse = msg };
+    }
+
+    /// First value parsed as `T`, or `null` when absent or invalid.
+    pub fn getOneParsed(self: *const ArgMatches, comptime T: type, id: []const u8) ?T {
+        const raw = self.getOne(id) orelse return null;
+        return parseValue(T, raw);
+    }
+
+    /// Parsed values that succeed. Invalid items are skipped. `null` if absent.
+    pub fn getManyParsed(self: *const ArgMatches, comptime T: type, id: []const u8, out: []T) ?[]T {
+        const raws = self.getMany(id) orelse return null;
+        var n: usize = 0;
+        for (raws) |raw| {
+            if (n >= out.len) break;
+            if (parseValue(T, raw)) |value| {
+                out[n] = value;
+                n += 1;
+            }
+        }
+        return out[0..n];
     }
 
     pub fn tryGetMany(self: *const ArgMatches, comptime T: type, id: []const u8, out: []T) error{ InvalidValue, ShortBuffer }!?[]T {
@@ -249,7 +275,11 @@ fn parseValue(comptime T: type, raw: []const u8) ?T {
         if (std.mem.eql(u8, raw, "false")) return false;
         return null;
     }
-    return std.fmt.parseInt(T, raw, 10) catch null;
+    switch (@typeInfo(T)) {
+        .int => return std.fmt.parseInt(T, raw, 10) catch null,
+        .float => return std.fmt.parseFloat(T, raw) catch null,
+        else => return null,
+    }
 }
 
 /// Command-line argument parser and application configuration.
@@ -299,6 +329,10 @@ pub const Xarp = struct {
         try self.args.append(self.allocator, arg);
     }
 
+    pub fn addArgs(self: *Xarp, args: []const Arg) !void {
+        try self.args.appendSlice(self.allocator, args);
+    }
+
     pub fn addSubcommand(self: *Xarp, sub: Xarp) !void {
         try self.subcommands.append(self.allocator, sub);
     }
@@ -338,8 +372,17 @@ pub const Xarp = struct {
     }
 
     fn lookupEnv(env_map: ?*const EnvMap, key: []const u8) ?[]const u8 {
-        const map = env_map orelse return null;
-        return map.get(key);
+        if (env_map) |map| return map.get(key);
+        return processGetenv(key);
+    }
+
+    fn processGetenv(key: []const u8) ?[]const u8 {
+        var terminated: [256]u8 = undefined;
+        if (key.len >= terminated.len) return null;
+        @memcpy(terminated[0..key.len], key);
+        terminated[key.len] = 0;
+        const value = std.c.getenv(terminated[0..key.len :0]) orelse return null;
+        return std.mem.span(value);
     }
 
     fn abandon(parsed: *ArgMatches, err: XarpError) Outcome {
@@ -665,6 +708,19 @@ pub const Xarp = struct {
         return null;
     }
 
+    pub fn printVersion(self: *const Xarp) !void {
+        const text = try self.renderVersion();
+        defer self.allocator.free(text);
+        _ = std.posix.write(std.posix.STDOUT_FILENO, text) catch {};
+        _ = std.posix.write(std.posix.STDOUT_FILENO, "\n") catch {};
+    }
+
+    pub fn printHelp(self: *const Xarp) !void {
+        const text = try self.renderHelp();
+        defer self.allocator.free(text);
+        _ = std.posix.write(std.posix.STDOUT_FILENO, text) catch {};
+    }
+
     pub fn renderVersion(self: *const Xarp) ![]u8 {
         var buf = Buf.init(self.allocator);
         errdefer buf.deinit();
@@ -701,13 +757,20 @@ pub const Xarp = struct {
 
         try buf.newline();
         const version = self.version orelse "unknown";
+        var upper: [128]u8 = undefined;
+        const name_badge = if (self.name.len + 2 <= upper.len) blk: {
+            upper[0] = ' ';
+            for (self.name, 0..) |c, i| upper[i + 1] = std.ascii.toUpper(c);
+            upper[self.name.len + 1] = ' ';
+            break :blk upper[0 .. self.name.len + 2];
+        } else self.name;
+        var ver_buf: [160]u8 = undefined;
+        const ver_text = std.fmt.bufPrint(&ver_buf, "v{s}", .{version}) catch version;
         try buf.paint(bar, "┃");
         try buf.write(" ");
-        try buf.write(" ");
-        try buf.paint(badge, self.name);
+        try buf.paint(badge, name_badge);
         try buf.write("  ");
-        try buf.paint(pill, "v");
-        try buf.paint(pill, version);
+        try buf.paint(pill, ver_text);
         try buf.write(" ");
         if (self.about) |about| {
             try buf.write(" ");
@@ -730,13 +793,21 @@ pub const Xarp = struct {
             const val = pos.value_name orelse pos.id;
             try buf.write(" ");
             if (pos.required) {
-                try buf.write("<");
-                try buf.paint(pos_syntax, val);
-                try buf.write(">");
+                var wrapped: [128]u8 = undefined;
+                if (val.len + 2 <= wrapped.len) {
+                    wrapped[0] = '<';
+                    @memcpy(wrapped[1..][0..val.len], val);
+                    wrapped[val.len + 1] = '>';
+                    try buf.paint(pos_syntax, wrapped[0 .. val.len + 2]);
+                } else try buf.paint(pos_syntax, val);
             } else {
-                try buf.write("[");
-                try buf.paint(opt_syntax, val);
-                try buf.write("]");
+                var wrapped: [128]u8 = undefined;
+                if (val.len + 2 <= wrapped.len) {
+                    wrapped[0] = '[';
+                    @memcpy(wrapped[1..][0..val.len], val);
+                    wrapped[val.len + 1] = ']';
+                    try buf.paint(opt_syntax, wrapped[0 .. val.len + 2]);
+                } else try buf.paint(opt_syntax, val);
             }
         }
         if (self.subcommands.items.len != 0) {
@@ -1344,4 +1415,124 @@ test "invalid default and append possible values" {
     var rejected = try append.tryGetMatchesFrom(&.{ "t", "--mode", "a", "--mode", "z" });
     defer rejected.deinit(ally);
     try std.testing.expect(rejected.err.isParse());
+}
+
+test "typed values invalid and missing" {
+    const ally = std.testing.allocator;
+    var app = Xarp.new(ally, "t");
+    defer app.deinit();
+    try app.addArg(Arg.new("port").withLong("port"));
+    var parsed = try app.tryGetMatchesFrom(&.{ "t", "--port", "abc" });
+    defer parsed.deinit(ally);
+    const matches = try takeMatches(&parsed);
+    try std.testing.expect(matches.getOneParsed(u16, "port") == null);
+    try std.testing.expectError(error.InvalidValue, matches.tryGetOne(u16, "port"));
+    const err = try matches.valueError("port", "abc");
+    defer err.deinit(ally);
+    try std.testing.expect(std.mem.indexOf(u8, err.message(), "--help") != null);
+    try std.testing.expectEqual(true, matches.getOneParsed(bool, "missing") == null);
+}
+
+test "positionals dash defaults and extras" {
+    const ally = std.testing.allocator;
+    var dash = Xarp.new(ally, "t");
+    defer dash.deinit();
+    try dash.addArg(Arg.new("file"));
+    var kept = try dash.tryGetMatchesFrom(&.{ "t", "-" });
+    defer kept.deinit(ally);
+    try std.testing.expectEqualStrings("-", (try takeMatches(&kept)).getOne("file").?);
+
+    var none = Xarp.new(ally, "t");
+    defer none.deinit();
+    var rejected = try none.tryGetMatchesFrom(&.{ "t", "-" });
+    defer rejected.deinit(ally);
+    try std.testing.expect(rejected.err.isParse());
+
+    var extra = Xarp.new(ally, "t");
+    defer extra.deinit();
+    try extra.addArg(Arg.new("a"));
+    var too_many = try extra.tryGetMatchesFrom(&.{ "t", "one", "two" });
+    defer too_many.deinit(ally);
+    try std.testing.expect(too_many.err.isParse());
+
+    var optional = Xarp.new(ally, "t");
+    defer optional.deinit();
+    try optional.addArg(Arg.new("file").withDefault("def"));
+    var filled = try optional.tryGetMatchesFrom(&.{"t"});
+    defer filled.deinit(ally);
+    try std.testing.expectEqualStrings("def", (try takeMatches(&filled)).getOne("file").?);
+}
+
+test "long forms empty value and dash value" {
+    const ally = std.testing.allocator;
+    var app = Xarp.new(ally, "t");
+    defer app.deinit();
+    try app.addArg(Arg.new("m").withLong("mode"));
+    var empty = try app.tryGetMatchesFrom(&.{ "t", "--mode=" });
+    defer empty.deinit(ally);
+    try std.testing.expectEqualStrings("", (try takeMatches(&empty)).getOne("m").?);
+    var dashed = try app.tryGetMatchesFrom(&.{ "t", "--mode", "-n" });
+    defer dashed.deinit(ally);
+    try std.testing.expectEqualStrings("-n", (try takeMatches(&dashed)).getOne("m").?);
+    var missing = try app.tryGetMatchesFrom(&.{ "t", "--mode" });
+    defer missing.deinit(ally);
+    try std.testing.expect(missing.err.isParse());
+}
+
+test "help text names the app and stays plain without theme" {
+    const ally = std.testing.allocator;
+    var app = Xarp.new(ally, "demo").withAbout("says hello").withStyles(Styles.plain());
+    defer app.deinit();
+    try app.addArg(Arg.new("file").withHelp("input path").setRequired(true));
+    const help = try app.renderHelp();
+    defer ally.free(help);
+    try std.testing.expect(std.mem.indexOf(u8, help, "DEMO") != null);
+    try std.testing.expect(std.mem.indexOf(u8, help, "Flags & Options") != null);
+    try std.testing.expect(std.mem.indexOf(u8, help, "\x1b[") == null);
+    const version = try app.withVersion("1.2.3").renderVersion();
+    defer ally.free(version);
+    try std.testing.expect(std.mem.indexOf(u8, version, "demo") != null);
+    try std.testing.expect(std.mem.indexOf(u8, version, "1.2.3") != null);
+}
+
+test "custom help short is not hijacked and inline flag is rejected" {
+    const ally = std.testing.allocator;
+    var custom = Xarp.new(ally, "t");
+    defer custom.deinit();
+    try custom.addArg(Arg.new("myh").withShort('h').withAction(.set_true));
+    var mine = try custom.tryGetMatchesFrom(&.{ "t", "-h" });
+    defer mine.deinit(ally);
+    try std.testing.expect((try takeMatches(&mine)).getFlag("myh"));
+
+    var flagged = Xarp.new(ally, "t");
+    defer flagged.deinit();
+    try flagged.addArg(Arg.new("f").withLong("flag").withAction(.set_true));
+    var bad = try flagged.tryGetMatchesFrom(&.{ "t", "--flag=false" });
+    defer bad.deinit(ally);
+    try std.testing.expect(bad.err.isParse());
+}
+
+test "single sided conflict and append after delimiter" {
+    const ally = std.testing.allocator;
+    var app = Xarp.new(ally, "t");
+    defer app.deinit();
+    var left = Arg.new("a").withLong("aaa");
+    try left.conflictsWith(ally, "b");
+    try app.addArg(left);
+    try app.addArg(Arg.new("b").withLong("bbb"));
+    var only_b = try app.tryGetMatchesFrom(&.{ "t", "--bbb", "2" });
+    defer only_b.deinit(ally);
+    try std.testing.expectEqualStrings("2", (try takeMatches(&only_b)).getOne("b").?);
+    var both = try app.tryGetMatchesFrom(&.{ "t", "--aaa", "1", "--bbb", "2" });
+    defer both.deinit(ally);
+    try std.testing.expect(both.err.isParse());
+
+    var files = Xarp.new(ally, "t");
+    defer files.deinit();
+    try files.addArg(Arg.new("f").withAction(.append));
+    var after = try files.tryGetMatchesFrom(&.{ "t", "--", "-a", "b" });
+    defer after.deinit(ally);
+    const many = (try takeMatches(&after)).getMany("f").?;
+    try std.testing.expectEqual(@as(usize, 2), many.len);
+    try std.testing.expectEqualStrings("-a", many[0]);
 }

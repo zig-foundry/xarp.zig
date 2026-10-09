@@ -8,6 +8,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
 
     const exe = b.addExecutable(.{
@@ -16,6 +17,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "xarp_zig", .module = mod },
             },
@@ -30,7 +32,7 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| run_cmd.addArgs(args);
 
     // `src/root.zig` imports every module, so this run includes color, effect,
-    // style, errors, and xarp tests. No libc is linked.
+    // style, errors, and xarp tests. libc is linked for `getenv`.
     const mod_tests = b.addTest(.{
         .root_module = mod,
     });

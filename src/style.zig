@@ -218,10 +218,10 @@ pub const Styles = struct {
 
     /// Default styled CLI theme (Cargo / Clap v4 styled look).
     ///
-    /// This does not read the process environment. Zig 0.16 has no libc-free
-    /// global getenv. Pass the result of `init.environ.getPosix("NO_COLOR") != null`
-    /// to `styledUnless` when color should follow `NO_COLOR`.
+    /// Returns plain styles when `NO_COLOR` is present, including an empty
+    /// value. Presence is enough; the value is not inspected.
     pub fn styled() Styles {
+        if (std.c.getenv("NO_COLOR") != null) return plain();
         return themed();
     }
 
