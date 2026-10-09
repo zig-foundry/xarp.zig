@@ -1,18 +1,19 @@
-//! ANSI text style modifiers and font effects.
+//! ```zig
+//! const eff = xarp.Effects.BOLD.bitOr(.UNDERLINE);
+//! ```
 //!
-//! The inner value is a bitmask; only the ten documented flag bits are valid.
-//! Use `Effects.fromBits` to fallibly convert a raw mask.
+//! Bitmask for ANSI text effects. Only the ten bits in `Effects.ALL` are valid.
 //!
-//! Rust's `Effects` is a tuple struct around `u16`, not an enum. Zig has no
-//! operator overloading, so `|`, `&`, and `!` are methods: `bitOr`, `bitAnd`,
-//! and `bitNot` (plus the `*Assign` variants).
+//! - Zig has no `|` / `&` / `!` overloads, so use `bitOr`, `bitAnd`, `bitNot`.
+//! - `fromBits` returns `null` on unknown bits; `fromBitsTruncate` drops them.
 
 const std = @import("std");
 
 /// ANSI text style modifiers and font effects.
 ///
-/// Raw bitflags representation. Only bits covered by `Effects.ALL` are defined.
+/// Holds a raw bitmask. Only bits in `Effects.ALL` are defined.
 pub const Effects = struct {
+    /// Raw flag bits. Don't set unknown bits; `fromBits` rejects them.
     bits: u16 = 0,
 
     /// No text effects.
@@ -71,8 +72,8 @@ pub const Effects = struct {
 
     /// Converts a raw bitmask into an effect set.
     ///
-    /// Returns `null` when `bits` contains undefined bits (outside `ALL`).
-    /// Use `fromBitsTruncate` to discard undefined bits instead.
+    /// Returns `null` when `bits` holds undefined bits (outside `ALL`).
+    /// Call `fromBitsTruncate` to drop undefined bits instead.
     pub fn fromBits(bits: u16) ?Effects {
         if (bits & ~ALL.bits == 0) {
             return .{ .bits = bits };
@@ -90,22 +91,22 @@ pub const Effects = struct {
         return NONE;
     }
 
-    /// Returns `true` if no effects are set.
+    /// `true` when no effects are set.
     pub fn isEmpty(self: Effects) bool {
         return self.bits == 0;
     }
 
-    /// Returns `true` if all effects in `other` are contained in `self`.
+    /// `true` when `self` holds every effect in `other`.
     pub fn contains(self: Effects, other: Effects) bool {
         return (self.bits & other.bits) == other.bits;
     }
 
-    /// Inserts the specified effects into `self`.
+    /// Returns a copy with `other` added.
     pub fn insert(self: Effects, other: Effects) Effects {
         return .{ .bits = self.bits | other.bits };
     }
 
-    /// Removes the specified effects from `self`.
+    /// Returns a copy with `other` removed.
     pub fn remove(self: Effects, other: Effects) Effects {
         return .{ .bits = self.bits & ~other.bits };
     }

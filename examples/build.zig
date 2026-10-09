@@ -1,5 +1,7 @@
 const std = @import("std");
 
+// Builds `basic_demo` and `advanced_cli` against the parent `xarp_zig` module.
+// libc is linked for `getenv`.
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});

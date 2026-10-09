@@ -1,8 +1,14 @@
-//! Text styles, ANSI output formatting, and CLI theme configurations.
+//! ```zig
+//! const warning = xarp.Style.new().bold().fgColor(.yellow);
+//! try writer.print("{f}{s}{s}\n", .{ warning, "disk full", xarp.RESET });
+//! ```
 //!
-//! Combine styles with `merge`. `withColor` sets a foreground only when one
-//! is not already set. `{f}` writes the opening SGR sequence; `writeReset`
-//! writes the reset.
+//! `Style` pairs fg/bg colors with `Effects`. `Styles` themes help and error output.
+//!
+//! - Combine with `merge`; right-hand colors win, effects join.
+//! - `withColor` sets fg only when none is set.
+//! - `{f}` writes the opening `\x1b[...m`; print `RESET` to clear it.
+//! - `Styles.styled` returns plain styles when `NO_COLOR` is set.
 
 const std = @import("std");
 const Color = @import("color.zig").Color;
@@ -20,12 +26,12 @@ pub const Style = struct {
     /// Set of visual text effects.
     effects: Effects = .NONE,
 
-    /// Creates a blank/unstyled style.
+    /// Creates a blank style with no colors or effects.
     pub fn new() Style {
         return .{};
     }
 
-    /// Returns `true` if no color or text effects are applied.
+    /// `true` when no color or effects are set. Plain styles print no escape codes.
     pub fn isPlain(self: Style) bool {
         return self.fg == null and self.bg == null and self.effects.isEmpty();
     }
@@ -174,9 +180,12 @@ fn writeCode(writer: *std.Io.Writer, first: *bool, code: u8) std.Io.Writer.Error
 
 /// Helper returned by `Style.paint`. Owns a copy of the style.
 pub const StyledText = struct {
+    /// Style applied around `text`.
     style: Style,
+    /// Raw text to wrap. Borrowed; must outlive the print call.
     text: []const u8,
 
+    /// Writes style codes + text + reset, or plain text when the style is empty.
     pub fn format(self: StyledText, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         if (self.style.isPlain()) {
             try writer.writeAll(self.text);
@@ -216,23 +225,21 @@ pub const Styles = struct {
         return .{};
     }
 
-    /// Default styled CLI theme (Cargo / Clap v4 styled look).
+    /// Default styled theme. Returns plain styles when `NO_COLOR` is set.
     ///
-    /// Returns plain styles when `NO_COLOR` is present, including an empty
-    /// value. Presence is enough; the value is not inspected.
+    /// Presence alone disables color; an empty value still counts.
     pub fn styled() Styles {
         if (std.c.getenv("NO_COLOR") != null) return plain();
         return themed();
     }
 
-    /// Returns plain styles when `no_color` is true, otherwise the default theme.
-    /// Any presence of `NO_COLOR`, including an empty value, should set `no_color`.
+    /// Returns plain styles when `no_color` is true, else the default theme.
     pub fn styledUnless(no_color: bool) Styles {
         if (no_color) return plain();
         return themed();
     }
 
-    /// The color theme, ignoring `NO_COLOR`.
+    /// The color theme. Skips the `NO_COLOR` check.
     pub fn themed() Styles {
         return .{
             .header = Style.new().bold().underline(),
@@ -247,54 +254,63 @@ pub const Styles = struct {
         };
     }
 
+    /// Replaces the header slot.
     pub fn setHeader(self: Styles, style: Style) Styles {
         var next = self;
         next.header = style;
         return next;
     }
 
+    /// Replaces the usage slot.
     pub fn setUsage(self: Styles, style: Style) Styles {
         var next = self;
         next.usage = style;
         return next;
     }
 
+    /// Replaces the literal slot.
     pub fn setLiteral(self: Styles, style: Style) Styles {
         var next = self;
         next.literal = style;
         return next;
     }
 
+    /// Replaces the placeholder slot.
     pub fn setPlaceholder(self: Styles, style: Style) Styles {
         var next = self;
         next.placeholder = style;
         return next;
     }
 
+    /// Replaces the error slot.
     pub fn setError(self: Styles, style: Style) Styles {
         var next = self;
         next.@"error" = style;
         return next;
     }
 
+    /// Replaces the valid slot.
     pub fn setValid(self: Styles, style: Style) Styles {
         var next = self;
         next.valid = style;
         return next;
     }
 
+    /// Replaces the invalid slot.
     pub fn setInvalid(self: Styles, style: Style) Styles {
         var next = self;
         next.invalid = style;
         return next;
     }
 
+    /// Replaces the warning slot.
     pub fn setWarning(self: Styles, style: Style) Styles {
         var next = self;
         next.warning = style;
         return next;
     }
 
+    /// Replaces the muted slot.
     pub fn setMuted(self: Styles, style: Style) Styles {
         var next = self;
         next.muted = style;

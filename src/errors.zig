@@ -1,21 +1,30 @@
-//! Errors encountered while evaluating command-line arguments.
+//! ```zig
+//! switch (outcome) {
+//!     .matches => |*m| try run(m),
+//!     .err => |err| {
+//!         defer err.deinit(allocator);
+//!         std.debug.print("{s}\n", .{err.message()});
+//!     },
+//! }
+//! ```
 //!
-//! The message is an allocated slice. Call `deinit` when you are done with it.
-//! Help and version are requests, not syntax failures, so they are separate
-//! variants from `parse`.
+//! Help, version, and parse failures. Each variant owns its message buffer.
+//!
+//! - Call `deinit` or you leak the message.
+//! - `isHelp` / `isVersion` mean normal output; `isParse` means exit code 2.
 
 const std = @import("std");
 
-/// Errors encountered while evaluating command-line arguments.
+/// Help, version, and parse failures. Each variant owns its message buffer.
 pub const XarpError = union(enum) {
-    /// Help documentation requested by the user. Payload is the rendered help text.
+    /// Rendered help text. Returned for `-h` / `--help`.
     help: []u8,
-    /// Version details requested by the user.
+    /// Rendered version text. Returned for `-V` / `--version`.
     version: []u8,
-    /// Argument syntax or validation failure.
+    /// Bad CLI input with a `--help` hint appended.
     parse: []u8,
 
-    /// Returns `true` when the user requested help output.
+    /// `true` for help output.
     pub fn isHelp(self: XarpError) bool {
         return switch (self) {
             .help => true,
@@ -23,7 +32,7 @@ pub const XarpError = union(enum) {
         };
     }
 
-    /// Returns `true` when the user requested version output.
+    /// `true` for version output.
     pub fn isVersion(self: XarpError) bool {
         return switch (self) {
             .version => true,
@@ -31,7 +40,7 @@ pub const XarpError = union(enum) {
         };
     }
 
-    /// Returns `true` for argument syntax or validation failures.
+    /// `true` for bad CLI input.
     pub fn isParse(self: XarpError) bool {
         return switch (self) {
             .parse => true,
@@ -39,7 +48,7 @@ pub const XarpError = union(enum) {
         };
     }
 
-    /// The rendered message.
+    /// Borrowed view of the message. Don't free it directly; call `deinit`.
     pub fn message(self: XarpError) []const u8 {
         return switch (self) {
             .help => |msg| msg,
@@ -48,16 +57,17 @@ pub const XarpError = union(enum) {
         };
     }
 
+    /// Frees the message buffer.
     pub fn deinit(self: XarpError, allocator: std.mem.Allocator) void {
         allocator.free(self.message());
     }
 
-    /// `{f}` writes the message.
+    /// Writes the message. Lets you print errors with `{f}`.
     pub fn format(self: XarpError, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.writeAll(self.message());
     }
 
-    /// Copies `msg` into a parse error.
+    /// Copies `msg` into a new parse error.
     pub fn fromMessage(allocator: std.mem.Allocator, msg: []const u8) !XarpError {
         return .{ .parse = try allocator.dupe(u8, msg) };
     }

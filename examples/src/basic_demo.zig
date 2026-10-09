@@ -1,3 +1,9 @@
+//! Basic demo: required positional, flags, defaults, and a subcommand.
+//!
+//! ```sh
+//! zig build basic -- input.txt -v
+//! zig build basic -- build --release
+//! ```
 const std = @import("std");
 const xarp = @import("xarp_zig");
 

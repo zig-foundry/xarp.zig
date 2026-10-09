@@ -1,4 +1,12 @@
-//! Color definitions and ANSI escape sequence generation.
+//! ```zig
+//! try writer.print("\x1b[{f}mHello\x1b[0m", .{xarp.Color.red});
+//! ```
+//!
+//! Named colors, 256-color codes, and 24-bit RGB. Writes raw SGR params,
+//! no leading `\x1b[` or trailing `m`.
+//!
+//! - `writeAnsi(writer, is_bg)` picks fg (`38;...`) or bg (`48;...`) codes.
+//! - Print `RESET` after styled text or color bleeds into later output.
 
 const std = @import("std");
 

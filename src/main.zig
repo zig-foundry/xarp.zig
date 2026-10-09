@@ -1,3 +1,8 @@
+//! Demo binary: greets `--name` or prints help/version.
+//!
+//! ```sh
+//! zig build run -- --name ada
+//! ```
 const std = @import("std");
 const xarp = @import("xarp_zig");
 
