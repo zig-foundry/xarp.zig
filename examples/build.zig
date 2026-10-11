@@ -44,6 +44,7 @@ pub fn build(b: *std.Build) void {
     }).module("xarp_zig");
 
     addExample(b, target, optimize, xarp, "basic", "src/basic_demo.zig", "basic_demo", "Run basic_demo");
+    addExample(b, target, optimize, xarp, "next", "src/next_cli.zig", "next_cli", "Run basic_demo");
     addExample(b, target, optimize, xarp, "advanced", "src/advanced_cli.zig", "advanced_cli", "Run advanced_cli");
     addExample(b, target, optimize, xarp, "env", "src/env_and_validation.zig", "env_and_validation", "Run env_and_validation");
     addExample(b, target, optimize, xarp, "errors", "src/error_handling.zig", "error_handling", "Run error_handling");

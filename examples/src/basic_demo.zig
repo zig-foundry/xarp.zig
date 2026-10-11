@@ -16,6 +16,7 @@ pub fn main(init: std.process.Init) !void {
 
     var build_cmd = xarp.Xarp.new(allocator, "build").withAbout("Compile source packages into binary distributions");
     try build_cmd.addArg(xarp.Arg.new("release").withLong("release").withHelp("Compile in release mode").withAction(.set_true));
+    defer build_cmd.deinit();
 
     var app = xarp.Xarp.new(allocator, "mycli")
         .withVersion("0.1.2")
